@@ -1,0 +1,22 @@
+version: '3.1'
+
+services:
+
+  #####################
+  # POSTGRES
+  # Contaions the database for the applications
+  #####################
+  postgres:
+    image: postgres
+    restart: always
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8090:8080
