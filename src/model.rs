@@ -1,4 +1,4 @@
-use diesel::{prelude::*, sql_types::BigInt};
+use diesel::prelude::*;
 
 use crate::schema::{division_updates, divisions};
 

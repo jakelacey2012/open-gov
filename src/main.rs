@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::env;
 use std::thread;
 use std::time::Duration;
@@ -13,8 +12,6 @@ use serenity::http::Http;
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::model::prelude::ChannelId;
-use serenity::model::prelude::GuildChannel;
-use serenity::model::prelude::GuildId;
 use serenity::prelude::*;
 use std::error::Error;
 use std::sync::Arc;
@@ -77,35 +74,67 @@ async fn ingest() {
         match load_division {
             Err(diesel::result::Error::NotFound) => {
                 println!("   division does not currenlty exist.");
-                fixture_thread(connection, &http, &division_obj).await
+                fixture_thread(connection, &http, &division_obj)
+                    .await
+                    .unwrap();
             }
             Ok(division) => {
                 println!("   division should be updated.");
-                update_thread(connection, &http, &division, &division_obj).await
+                update_thread(connection, &http, &division, &division_obj).await;
             }
             Err(_) => todo!("what"),
         }
-        .unwrap();
     }
 }
 
+// -> Result<model::Division, Box<(dyn StdError + std::marker::Send + Sync + 'static)>>
 async fn update_thread(
     connection: &mut PgConnection,
     http: &Arc<Http>,
     division: &Division,
     division_obj: &DivisionObj,
-) -> Result<model::Division, Box<(dyn StdError + std::marker::Send + Sync + 'static)>> {
+) {
     println!("  updating thread: {:?}", division_obj.division_id);
     let full_division_obj = fetch_division(division.division_id).await.unwrap();
 
-    ChannelId(division.discord_thread_id as u64)
-        .send_message(http, |m| m.content("this is some contents"))
-        .await
-        .unwrap();
+    let load_last_division_update = self::schema::division_updates::dsl::division_updates
+        .filter(division_updates::publication_updated.eq(full_division_obj.publication_updated))
+        .first::<DivisionUpdate>(connection);
 
-    // DONE
+    match load_last_division_update {
+        Err(diesel::result::Error::NotFound) => {
+            update_division_thread(connection, http, division, division_obj)
+                .await
+                .unwrap();
+        }
+        Ok(_division_update) => {} // Nothing to do here, because the update already exists.
+        Err(_) => todo!("nothing to do"),
+    }
+}
 
-    todo!("post a message inside this thread")
+async fn update_division_thread(
+    connection: &mut PgConnection,
+    http: &Arc<Http>,
+    division: &Division,
+    division_obj: &DivisionObj,
+) -> Result<DivisionUpdate, Box<dyn Error + Send + Sync>> {
+    let division_updated =
+        create_division_update(connection, division.id, &division_obj.publication_updated);
+
+    match division_updated {
+        Ok(_) => {
+            ChannelId(division.discord_thread_id as u64)
+                .send_message(http, |m| m.content("this division has been updated"))
+                .await
+                .unwrap();
+        }
+        Err(error) => {
+            println!("{:?}", error);
+            todo!("something neds to be done here");
+        }
+    };
+
+    division_updated
 }
 
 async fn fixture_thread(
@@ -192,23 +221,23 @@ fn create_division(
     Ok(division)
 }
 
-// fn new_division_update(
-//     conn: &mut PgConnection,
-//     division_id: i32,
-//     publication_updated: &str,
-// ) -> Result<DivisionUpdate, Box<dyn Error + Send + Sync>> {
-//     let new_division_update = NewDivisionUpdate {
-//         division_id,
-//         publication_updated,
-//     };
+fn create_division_update(
+    conn: &mut PgConnection,
+    division_id: i32, // @NOTE: this id is really the internal id
+    publication_updated: &str,
+) -> Result<DivisionUpdate, Box<dyn Error + Send + Sync>> {
+    let new_division_update = NewDivisionUpdate {
+        division_id,
+        publication_updated,
+    };
 
-//     let division_update = diesel::insert_into(division_updates::table)
-//         .values(&new_division_update)
-//         .returning(DivisionUpdate::as_returning())
-//         .get_result(conn)?;
+    let division_update = diesel::insert_into(division_updates::table)
+        .values(&new_division_update)
+        .returning(DivisionUpdate::as_returning())
+        .get_result(conn)?;
 
-//     Ok(division_update)
-// }
+    Ok(division_update)
+}
 
 use hyper::body::Buf;
 use hyper_tls::HttpsConnector;
@@ -224,7 +253,7 @@ struct DivisionObj {
 }
 
 async fn fetch_divisions() -> ResultRes<Vec<DivisionObj>> {
-    let url = "https://commonsvotes-api.parliament.uk/data/divisions.json/search"
+    let url = "https://commonsvotes-api.parliament.uk/data/divisions.json/search?take=1"
         .parse()
         .unwrap();
 

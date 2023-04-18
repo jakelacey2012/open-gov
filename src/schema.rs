@@ -3,7 +3,7 @@
 diesel::table! {
     division_updates (id) {
         id -> Int4,
-        division_id -> Nullable<Int4>,
+        division_id -> Int4,
         publication_updated -> Text,
     }
 }
